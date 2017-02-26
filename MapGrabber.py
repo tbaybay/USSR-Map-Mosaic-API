@@ -16,6 +16,9 @@ BORDER_W = 60 # Number of pixels between outer and inner border
 #       - Map borders form rectangles (i.e. no perspective shift / maps are scanned)
 #       - Map outer and inner borders are parallel
 
+# To add:
+#   > weight horizontal line filter toward r.h.s. to mitigate map sag
+
 def crop_border(img): # Accepts an RGB image
     img_rows, img_cols, _ = img.shape
     ob_vertices = _find_outer_border(img.copy()) # Outer border vertices
