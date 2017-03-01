@@ -11,10 +11,12 @@ BORDER_W = 60 # Number of pixels between outer and inner border
 #       > Locate outer border by finding edge points nearest to image corners.
 #       > Locate inner border using a manually tuned line filter.
 # Assumptions (from crudest to reasonable):
-#       - Map inner border is always ~60px in from outer border (i.e. scan resolutions are identical)
+#       - Map inner border is always ~60px in from outer border (i.e. scan resolutions are constant)
 #       - No gunk between map corners and image corners
 #       - Map borders form rectangles (i.e. no perspective shift / maps are scanned)
 #       - Map outer and inner borders are parallel
+# IDEA: Find contour with largest area post-blurring, possibly dilate image to make sure the border is continuous.
+#       > could be used to find the interior map region directly.
 
 # To add:
 #   > weight horizontal line filter toward r.h.s. to mitigate map sag
