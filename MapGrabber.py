@@ -17,6 +17,7 @@ BORDER_W = 60 # Number of pixels between outer and inner border
 #       - Map outer and inner borders are parallel
 # IDEA: Find contour with largest area post-blurring, possibly dilate image to make sure the border is continuous.
 #       > could be used to find the interior map region directly.
+#       > use a perspective transform to correct leftward sag of image!
 
 # To add:
 #   > weight horizontal line filter toward r.h.s. to mitigate map sag
