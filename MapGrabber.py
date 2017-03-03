@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+from numpy.linalg import norm
+from skimage.morphology import binary_dilation
 
 BORDER_H = 66
 BORDER_W = 56
@@ -14,6 +16,7 @@ BORDER_W = 56
 def crop_border(img):
     gray = cv2.cvtColor(img.copy(), cv2.COLOR_RGB2GRAY)
     smoothed = cv2.bilateralFilter(gray.copy(), 10, 30, 12)
+    edges = cv2.Canny(smoothed.copy(), 110, 230)
     dilated = binary_dilation(edges).astype('uint8')
     _, cnts, hier = cv2.findContours(dilated, mode=cv2.RETR_EXTERNAL, method=cv2.CHAIN_APPROX_SIMPLE)
     border = sorted(cnts, key=cv2.contourArea, reverse=True)[0]
@@ -22,7 +25,8 @@ def crop_border(img):
     box_pts = np.reshape(border_contour, [4, 2])
     warped_img = correct_perspective_shift(img.copy(), box_pts)
     cropped_img = warped_img[BORDER_H:-BORDER_H, BORDER_W:-BORDER_W]
-    return cropped_img
+    cropped_img = cv2.bilateralFilter(cropped_img, 10, 30, 12)
+    return histogram_equalization(cropped_img)
 
 def correct_perspective_shift(img, box_pts):
     # Arrange detected box points in clockwise order from top-left
@@ -44,3 +48,8 @@ def correct_perspective_shift(img, box_pts):
     M = cv2.getPerspectiveTransform(src, dst)
     warp = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
     return warp
+
+def histogram_equalization(img):
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2YCrCb)
+    img[:, :, 0] = cv2.equalizeHist(img[:, :, 0])
+    return cv2.cvtColor(img, cv2.COLOR_YCrCb2RGB)
