@@ -1,87 +1,46 @@
 import cv2
 import numpy as np
-from scipy import ndimage
-import glob
-from skimage.transform import rotate
-from matplotlib import patches
-np.random.seed(42)
-BORDER_W = 60 # Number of pixels between outer and inner border
+
+BORDER_H = 66
+BORDER_W = 56
 
 # Idea: > Correct skew then crop.
 #       > Locate outer border by finding edge points nearest to image corners.
 #       > Locate inner border using a manually tuned line filter.
 # Assumptions (from crudest to reasonable):
-#       - Map inner border is always ~60px in from outer border (i.e. scan resolutions are identical)
-#       - No gunk between map corners and image corners
-#       - Map borders form rectangles (i.e. no perspective shift / maps are scanned)
+#       - Fixed map border widths (i.e. images scanned using same scanner)
 #       - Map outer and inner borders are parallel
 
-def crop_border(img): # Accepts an RGB image
-    img_rows, img_cols, _ = img.shape
-    ob_vertices = _find_outer_border(img.copy()) # Outer border vertices
-    map_center = _find_center(ob_vertices)
-    top_border = ob_vertices[1] - ob_vertices[0] # Vector from tl to tr of outer border
-    th = np.arctan(top_border[0]/top_border[1]) # Skew of map relative to horizontal
-    rot_img = _rotate_and_crop(img, th, map_center)
-    [tl, tr, lr, ll] = _find_outer_border(rot_img.copy())
-    cropped_img = rot_img[tl[0]:ll[0], tl[1]:tr[1], :]
-    hpos = get_line(cropped_img, filter_='vertical') # Col. extent of horizontal border
-    vpos = get_line(cropped_img, filter_='horizontal') # Row extent of vertical border
-    return cropped_img[vpos[0]:vpos[1], hpos[0]:hpos[1], :]
+def crop_border(img):
+    gray = cv2.cvtColor(img.copy(), cv2.COLOR_RGB2GRAY)
+    smoothed = cv2.bilateralFilter(gray.copy(), 10, 30, 12)
+    dilated = binary_dilation(edges).astype('uint8')
+    _, cnts, hier = cv2.findContours(dilated, mode=cv2.RETR_EXTERNAL, method=cv2.CHAIN_APPROX_SIMPLE)
+    border = sorted(cnts, key=cv2.contourArea, reverse=True)[0]
+    perimeter = cv2.arcLength(border, True)
+    border_contour = [cv2.approxPolyDP(border, 0.1*perimeter, True)]
+    box_pts = np.reshape(border_contour, [4, 2])
+    warped_img = correct_perspective_shift(img.copy(), box_pts)
+    cropped_img = warped_img[BORDER_H:-BORDER_H, BORDER_W:-BORDER_W]
+    return cropped_img
 
-def _rotate_and_crop(img, th, rot_center):
-    delta_x, delta_y = abs(np.ceil(np.array(img.shape[:2])*np.sin(th)).astype(int)) # Background exposed by rotation
-    rot_img = rotate(img, th, center=rot_center)
-    cropped_img = rot_img[delta_y:min(-delta_y, -1), delta_x:min(-delta_x, -1), :]
-    formatted_img = (cropped_img*255).astype('uint8')
-    return formatted_img
-
-def _normal_filter(filter_width): # 1D kernel of normal pdf
-    N_SAMPLES = 100000
-    return np.histogram(np.clip(np.random.randn(N_SAMPLES), -3, 3)+3, bins=np.round(filter_width), normed=True)[0]
-
-def _find_outer_border(map_img): # Returns outer border corners, tl , tr, lr, ll in [row, col] coords
-    gray = cv2.cvtColor(map_img.copy(), cv2.COLOR_RGB2GRAY)
-    gray = cv2.bilateralFilter(gray, 10, 17, 17)
-    thresh = cv2.Canny(gray, 30, 200)
-    nz_px_posn = np.array(np.where(thresh != 0))
-    img_height, img_width, _ = map_img.shape
-    img_corners = np.array([[0, 0, img_height, img_height], [0, img_width, img_width, 0]])
-    border = []
-    for ix in range(4): # Get the nearest point to each corner
-        corner = img_corners[:, ix, None]
-        distances = np.linalg.norm(nz_px_posn-corner, axis=0)
-        border.append(nz_px_posn[:, np.argmin(distances)])
-    border = np.array([pos.flatten() for pos in border])
-    return border
-
-def _find_center(quad_vertices): # Returns [row, col] of center. Quad vertices are defined as [tl, tr, lr, ll].
-    tle, tri, lri, lle = quad_vertices
-    diagonal = tri - lle
-    center = np.round(lle + diagonal/2).astype(int)
-    return center
-
-def _interior_filter(img_width, filter_width, filter_ix): # Returns a 1D kernel with normal dist at filter_ix
-    interior_filter = np.zeros(img_width)
-    ixs = range(int(filter_ix-filter_width/2), int(filter_ix+filter_width/2))
-    interior_filter[ixs] = _normal_filter(filter_width)
-    interior_filter[(np.array(img_width)-ixs-1).astype(int)] = -_normal_filter(filter_width)
-    return interior_filter
-
-def get_line(map_img, mode='position', filter_='vertical'):
-    img_height, img_width, _ = map_img.shape
-    gray = cv2.cvtColor(map_img, cv2.COLOR_RGB2GRAY)
-    if filter_=='vertical':
-        scaler = _interior_filter(img_width, int(BORDER_W/2), BORDER_W)
-        line_filter = np.ones([img_height])
-        line_scores = np.matmul(line_filter, gray)
-        line_scores = scaler*line_scores
-    elif filter_=='horizontal':
-        scaler = _interior_filter(img_height, int(BORDER_W/2), BORDER_W)
-        line_filter = np.ones([img_width])
-        line_scores = np.matmul(gray, line_filter)
-        line_scores = scaler*line_scores
-    if mode=='scores':
-        return line_scores
-    elif mode=='position':
-        return np.array([np.argmax(line_scores), np.argmin(line_scores)]).flatten()
+def correct_perspective_shift(img, box_pts):
+    # Arrange detected box points in clockwise order from top-left
+    cbox_pts = box_pts - np.mean(box_pts, axis=0)
+    tl = box_pts[np.argmax(-cbox_pts[:, 0] - cbox_pts[:, 1])] # --
+    tr = box_pts[np.argmax(-cbox_pts[:, 0] + cbox_pts[:, 1])]# -+
+    br = box_pts[np.argmax(cbox_pts[:, 0] + cbox_pts[:, 1])]# ++
+    bl = box_pts[np.argmax(cbox_pts[:, 0] - cbox_pts[:, 1])]# +-
+    src = np.array([tl, tr, br, bl]).astype('float32')
+    maxWidth = int( max(norm(tr - tl), norm(br - bl)) )
+    maxHeight = int( max(norm(tl - bl), norm(tr - br)) )
+    # Describe destination box shape
+    dst = np.array([
+            [0, 0], # tl
+            [0, maxHeight-1], # tr
+            [maxWidth-1, maxHeight-1],
+            [maxWidth-1, 0]
+        ], dtype='float32')
+    M = cv2.getPerspectiveTransform(src, dst)
+    warp = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
+    return warp
