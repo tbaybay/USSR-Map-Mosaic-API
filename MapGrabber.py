@@ -23,6 +23,12 @@ BORDER_W = 56
 # Assumptions (from crudest to reasonable):
 #       - Fixed map border widths (i.e. images scanned using same scanner)
 #       - Map outer and inner borders are parallel
+# IDEA: Find contour with largest area post-blurring, possibly dilate image to make sure the border is continuous.
+#       > could be used to find the interior map region directly.
+#       > use a perspective transform to correct leftward sag of image!
+
+# To add:
+#   > weight horizontal line filter toward r.h.s. to mitigate map sag
 
 def crop_border(img):
     gray = cv2.cvtColor(img.copy(), cv2.COLOR_RGB2GRAY)
