@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import cv2
 import numpy as np
 from numpy.linalg import norm
@@ -6,6 +8,7 @@ from skimage.morphology import binary_dilation
 from scipy.misc import imresize
 from scipy.ndimage import imread
 from matplotlib import pyplot as plt
+import glob
 import requests
 import time
 
@@ -15,7 +18,8 @@ BORDER_W = 56
 # Idea: > Download maps
 #       > Correct skew then crop.
 #       > Locate inner border using manually tuned parameters.
-#       > Stitch together results
+#       > Stitch together results into 3x3 blocks
+#       > Add grid references and write to .png
 # Assumptions (from crudest to reasonable):
 #       - Fixed map border widths (i.e. images scanned using same scanner)
 #       - Map outer and inner borders are parallel
@@ -73,38 +77,64 @@ def download_maps():
     time.sleep(5) # Be polite
     
 def stitch(img1, img2, dim=1):
-    max_dim = np.max([img1.shape[dim], img2.shape[dim]]);
+    t_dim = abs(dim - 1)
+    max_dim = np.max([img1.shape[t_dim], img2.shape[t_dim]]);
     if dim == 1:
+        img1 = imresize(img1, (max_dim, img1.shape[1]));
+        img2 = imresize(img2, (max_dim, img2.shape[1]));
+    if dim == 0:
         img1 = imresize(img1, (img1.shape[0], max_dim));
         img2 = imresize(img2, (img2.shape[0], max_dim));
-    if dim == 0:
-        img1 = imresize(img1, (max_dim, img1.shape[1]));
-        img2 = imresize(img2, (max_dim, img1.shape[1]));
-    return np.concatenate([img1, img2], axis=abs(dim-1))
+    return np.concatenate([img1, img2], axis=dim)
 
-def add_grid_references(map_img, llcrnr, urcrnr, c='#ff0080'):
+def add_grid_references(map_img, llcrnr, urcrnr, c='#000000'):
+    f = plt.figure(figsize=(10, 10));
     m = Basemap(llcrnrlon=llcrnr[1], llcrnrlat=llcrnr[0],
                 urcrnrlon=urcrnr[1], urcrnrlat=urcrnr[0],
                 lon_0=np.mean([llcrnr[1], urcrnr[1]]), lat_0=np.mean([urcrnr[0], llcrnr[0]]),
                 projection = 'tmerc',
                 ellps = 'WGS84')
-    parallels = np.arange(llcrnr[0], urcrnr[0], 0.025)
-    meridians = np.arange(llcrnr[1], urcrnr[1], 0.025)
-    m.drawparallels(parallels, color=c, linewidth=1)
-    m.drawmeridians(meridians, color=c, linewidth=1)
+    parallels = np.arange(llcrnr[0], urcrnr[0], 0.05)
+    meridians = np.arange(llcrnr[1], urcrnr[1], 0.05)
+    m.drawparallels(parallels, color=c, linewidth=.1, dashes=[5, 2])
+    m.drawmeridians(meridians, color=c, linewidth=.1, dashes=[5, 2])
     delta_x = (m(meridians[1], parallels[0])[0] - m(meridians[0], parallels[0])[0])/2
     delta_y = (m(meridians[0], parallels[1])[1] - m(meridians[0], parallels[0])[1])/2
-    m.imshow(map_img);
+    m.imshow(map_img, origin='upper');
     for i, lat in enumerate(parallels[1:]):
         for j, lon in enumerate(meridians[:-1]):
             if (i % 2 == 0 and j % 2 == 0):
                 x, y = m(lon, lat);
-                plt.text(x, y,
-                         str(round(lat, 2)),
-                         color=c, alpha=1,
-                         size=12);
-                plt.text(x - 0.2*delta_x, y - delta_y,
-                         str(round(lon, 2)),
+                plt.text(x + delta_x, y,
+                         str(round(lat, 2))+'°',
+                         color=c, alpha=1, ha='center',
+                         va='center', size=2);
+                plt.text(x, y - delta_y,
+                         str(round(lon, 2))+'°',
                          rotation=-90,
-                         color=c, alpha=1,
-                         size=12)
+                         color=c, alpha=1, ha='center',
+                         va='center', size=2)
+    return f
+
+def create_map(r_ix, c_ix):
+    UR_LONG = np.arange(42.5, 48.1, .5)
+    UR_LAT = np.arange(44, 40.3, -1./3.)
+    LL_LONG = np.arange(42, 47.6, .5)
+    LL_LAT = np.arange(43.666666666, 39.9, -1./3.)
+    img_fps = glob.glob('./k38_lom_cropped/*')
+    col_ix = np.array([0, 1, 2]) + c_ix;
+    row_ix = np.array([1, 2]) + r_ix;
+    for i in col_ix:
+        img_col = imread(img_fps[r_ix*12 + i]);
+        for j in row_ix:
+            img_col = stitch(img_col, imread(img_fps[j*12 + i]), dim=0)
+        if i == col_ix[0]:
+            stitched_img = img_col
+        else:
+            stitched_img = stitch(stitched_img, img_col, dim=1)
+    llcrnr = [LL_LAT[r_ix+2], LL_LONG[c_ix]]
+    urcrnr = [UR_LAT[r_ix], UR_LONG[c_ix+2]]
+    f = add_grid_references(stitched_img, llcrnr, urcrnr)
+    name = str(r_ix)+'_'+str(c_ix)
+    f.savefig(name+'.png', dpi=1500, transparent=True, bbox_inches='tight')
+    plt.close('all')
