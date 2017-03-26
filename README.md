@@ -1,5 +1,5 @@
 # USSR-Map-Mosaic-API
-Interface for downloading, cropping, and stitching Soviet-era maps available at http://nav.lom.name/maps_scan/. Corrects perspective, skew, crops borders, overlays WGS grid references, writes results as a .png file.
+MapMosaic.py provides an interface for downloading, cropping, and stitching Soviet-era maps available at http://nav.lom.name/maps_scan/. Corrects perspective, skew, crops borders, overlays WGS grid references, writes results as a .png file.
 
 26/03/2017
 ----------
